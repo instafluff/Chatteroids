@@ -1,0 +1,346 @@
+{% extends 'layout.twig' %}
+
+{% block body %}
+	<div id="chatteroids"></div>
+	<script>
+		var config = {
+			type: Phaser.AUTO,
+			width: 800,
+			height: 800,
+    	// transparent: true,
+			parent: 'chatteroids',
+			physics: {
+					default: 'arcade',
+					arcade: {
+							// debug: true,
+							// gravity: { y: 200 }
+					}
+			},
+			scene: {
+					preload: preload,
+					create: create,
+					update: update
+			}
+		};
+
+		var game = new Phaser.Game(config);
+		var graphics;
+		var debug = true;
+		var phaser = undefined;
+		var collisions;
+		var colliders = {};
+		var bot;
+		var balls = {};
+		var winners = {};
+		var refreshTimer = null;
+		var botDirection = 0; // -1 left, 0 straight, 1 right
+		const PI = 3.1415926535;
+		var botDirection = 0;// -PI / 2;
+		var botVelocity = 200;
+		var maxAngle = 60 * ( 2 * PI / 360 );
+		var lastBotUpdateTime = 0;
+		var line;
+
+		var pikaState = "idle"; // "idle", "left", "right"
+		var previousRayVals = -1;
+
+		function aiCompute( rayVals ) {
+			var rayMax = 0;
+			var numCasts = rayVals.length;
+			for( var i = 0; i < numCasts; i++ ) {
+				var change = ( numCasts / 2 - Math.abs( i - numCasts / 2 ) ) / ( numCasts / 2 );
+				rayMax += 300 * change;
+			}
+
+			var total = 0, leftTotal = 0, rightTotal = 0;
+			for( var i = 0, len = rayVals.length / 2; i < len; i++ ) {
+				leftTotal += rayVals[ i ];
+			}
+			for( var i = Math.floor( rayVals.length / 2 ), len = rayVals.length; i < len; i++ ) {
+				rightTotal += rayVals[ i ];
+			}
+			total = rayVals.reduce( (a, b) => a + b );
+			// console.log( "left: " + leftTotal );
+			// console.log( "right: " + rightTotal );
+			if( total > 0 && total < rayMax - 10 ) {
+				if( leftTotal > rightTotal ) {
+					pikaState = "left";
+				}
+				else {
+					pikaState = "right";
+				}
+			}
+			else {
+				pikaState = "idle";
+			}
+
+			// switch( pikaState ) {
+			// case "idle":
+			// 	if( total > 0 && total < rayMax - 10 ) {
+			// 		// Turn in a direction
+			// 		if( leftTotal > rightTotal ) {
+			// 			pikaState = "left";
+			// 		}
+			// 		else {
+			// 			pikaState = "right";
+			// 		}
+			// 	}
+			// 	break;
+			// case "left":
+			// 	if( previousRayVals < total - 50 ) {
+			// 		pikaState = "idle";
+			// 	}
+			// 	break;
+			// case "right":
+			// 	if( previousRayVals < total - 50 ) {
+			// 		pikaState = "idle";
+			// 	}
+			// 	break;
+			// }
+			previousRayVals = total;
+			switch( pikaState ) {
+				case "left":
+					return -90;
+				case "right":
+					return 90;
+				case "idle":
+				default:
+					return 0;
+			}
+		}
+
+		function preload ()
+		{
+			this.load.image('moon', 'images/moon.png');
+			this.load.image('wizball', 'images/pika.png');
+			this.load.image('peg', 'images/peg.png');
+			this.load.image('wall', 'images/wall.png');
+			this.load.image('star', 'images/star.png');
+		}
+
+		function create ()
+		{
+			phaser = this;
+			graphics = this.add.graphics({ lineStyle: { width: 4, color: 0xaa00aa } });
+			this.game.antialias = true;
+			this.game.clearBeforeRender = true;
+			startGame();
+		}
+
+		function botRaycast( angle, maxRayLength = 300 ) {
+			var pX = bot.x, pY = bot.y;
+			var dX = Math.cos( angle ), dY = Math.sin( angle );
+			var pX1 = bot.x + dX * maxRayLength, pY1 = bot.y + dY * maxRayLength;
+			if( !line ) {
+				line = new Phaser.Geom.Line( pX, pY, pX1, pY1 );
+			}
+			console.log( dX + ", " + dY );
+			console.log( pX1 + " " + pY1 );
+			for( var marble in balls ) {
+				var marbleObj = balls[ marble ];
+				var distToMarble = distToSegment( { x: marbleObj.object.x, y: marbleObj.object.y }, { x: pX, y: pY }, { x: pX1, y: pY1 } );
+				var circle = new Phaser.Geom.Circle( marbleObj.object.x, marbleObj.object.y, 32 );
+				// graphics.strokeCircleShape(circle);
+				if( distToMarble < 32 ) {
+					// Intersected!
+					var cX = marbleObj.object.x, cY = marbleObj.object.y;
+					var vX = cX - pX, vY = cY - pY;
+					var vLen = Math.sqrt( vX * vX + vY * vY ) - 32;
+					var appxX = pX + dX * vLen, appxY = pY + dY * vLen;
+					if( debug ) {
+						console.log( appxX + " - " + appxY );
+						line.setTo( pX, pY, appxX, appxY );
+						graphics.strokeLineShape( line );
+						graphics.strokeCircleShape(circle);
+					}
+					return vLen;
+				}
+			}
+			// console.log( "no intersect" );
+			// Check against walls
+			if( pX1 < 0 ) {
+				return Math.abs( dX * pX );
+			}
+			if( pX1 > 800 ) {
+				var x = 800 - pX;
+				return Math.abs( dX * x );
+			}
+			if( pY1 < 0 ) {
+				return Math.abs( dY * pY );
+			}
+			if( pY1 > 800 ) {
+				var y = 800 - pY;
+				return Math.abs( dY * y );
+			}
+			if( debug ) {
+				line.setTo( pX, pY, pX1, pY1 );
+				graphics.strokeLineShape( line );
+			}
+			return maxRayLength;
+		}
+
+		function botTurn( angle ) {
+			var angleRads = angle * ( 2 * PI / 360 );
+			if( angleRads < -maxAngle ) {
+				angleRads = -maxAngle;
+			}
+			if( angleRads > maxAngle ) {
+				angleRads = maxAngle;
+			}
+			botDirection += angleRads;
+			if( botDirection < -PI * 2 ) {
+				botDirection += PI * 2;
+			}
+			if( botDirection > PI * 2 ) {
+				botDirection -= PI * 2;
+			}
+		}
+
+		function update(time, delta) {
+			if( time - 50 > lastBotUpdateTime ) {
+				graphics.clear();
+				var timeFactor = 0.05;
+				var rayVals = [];
+				var numCasts = 10;
+				for( var i = 0; i < numCasts; i++ ) {
+					var change = ( numCasts / 2 - Math.abs( i - numCasts / 2 ) ) / ( numCasts / 2 );
+					rayVals.push( botRaycast( botDirection - PI / 2 + i * PI / ( numCasts - 1 ),
+				 		300 * change ) );
+				}
+				var turnAngle = aiCompute( rayVals );
+				botTurn( turnAngle * timeFactor );
+				bot.setVelocity( botVelocity * Math.cos( botDirection ), botVelocity * Math.sin( botDirection ) );
+				// bot.setVelocity( 0, 0 );
+				bot.setAngle( 270 + botDirection * ( 360 / ( 2 * PI ) ) );
+				lastBotUpdateTime = time;
+			}
+
+			for( var marble in balls ) {
+				var marbleObj = balls[ marble ];
+				marbleObj.text.x = marbleObj.object.x;
+				marbleObj.text.y = marbleObj.object.y - 35;
+
+				if( marbleObj.object.y > 750 && Math.abs(marbleObj.object.body.velocity.y) < 10 ) {
+					if( colliders[ marbleObj.object.name ] ) {
+						phaser.physics.world.removeCollider(colliders[ marbleObj.object.name ]);
+						delete colliders[ marbleObj.object.name ];
+
+						if( marbleObj.object.x > 320 && marbleObj.object.x < 480 ) {
+							// Winner!
+							winners[ marbleObj.object.name ] = true;
+							console.log( Object.keys( winners ) );
+						}
+					}
+				}
+			}
+		}
+
+		function startGame() {
+			collisions = phaser.physics.add.group({
+				// bounceX: 0.95, bounceY: 0.6,
+				bounceX: 1, bounceY: 1,
+				collideWorldBounds: true
+			});
+			bot = phaser.physics.add.image( 400, 400, "wizball" );
+			bot.setOrigin( 0.5 );
+			bot.setCircle( 16 );
+			bot.setBounce( 1 );
+			bot.setCollideWorldBounds(true);
+		}
+
+		function addUser( username ) {
+			if( !balls[ username ] ) {
+				var dropPosition = getRandomInt(768);
+				// var userMarble = phaser.physics.add.image(dropPosition, 65, 'wizball');
+				// var userMarble = collisions.create(dropPosition, -165, 'moon');
+				var userMarble = collisions.create(450, 380, 'moon');
+				var userText = phaser.add.text(dropPosition, -190, username);
+				userText.setOrigin( 0.5 );
+				userMarble.name = username;
+				userMarble.setCircle(32);
+				userMarble.setDrag( 0, 0 );
+				userMarble.body.allowDrag = false;
+				// userMarble.body.stopVelocityOnCollide = false;
+				userMarble.allowRotation = true;
+				// userMarble.setMass( 10 );
+				// userMarble.setCollideWorldBounds(true);
+				userMarble.setBounce(1);
+				userMarble.setVelocity(getRandomInt(600)-300, getRandomInt(200));
+				// userMarble.setVelocity(0, 0);
+				colliders[ username ] = phaser.physics.add.collider(userMarble, collisions);
+				// phaser.physics.add.collider(userMarble, walls, (marble, block) => {
+				// 	if( !marble.body.isMoving && marble.y < block.y ) {
+				// 		marble.setVelocity( getRandomInt( 200 ) - 100, -20 );
+				// 	}
+				// });
+				// phaser.physics.add.collider(userMarble, blocks, (marble, block) => {
+				// 	if( !marble.body.isMoving && marble.y < block.y ) {
+				// 		marble.setVelocity( ( getRandomInt( 100 ) + 20 ) * ( marble.x < block.x ? -1 : 1 ), -100 );
+				// 	}
+				// });
+				phaser.physics.add.collider( userMarble, bot, ( marble, pika ) => {
+					console.log( marble.name + " collided with Pikachu!" );
+				});
+				balls[ username ] = {
+					text: userText,
+					object: userMarble
+				}
+			}
+		}
+
+		function getRandomInt(max) {
+		  return Math.floor(Math.random() * Math.floor(max));
+		}
+
+		function sqr(x) { return x * x }
+		function dist2(v, w) { return sqr(v.x - w.x) + sqr(v.y - w.y) }
+		function distToSegmentSquared(p, v, w) {
+		  var l2 = dist2(v, w);
+		  if (l2 == 0) return dist2(p, v);
+		  var t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2;
+		  t = Math.max(0, Math.min(1, t));
+		  return dist2(p, { x: v.x + t * (w.x - v.x),
+		                    y: v.y + t * (w.y - v.y) });
+		}
+		function distToSegment(p, v, w) { return Math.sqrt(distToSegmentSquared(p, v, w)); }
+
+		var client = null;
+
+		$( document ).ready(function() {
+			$("#chatteroids").hide();
+
+			var options = {
+				options: {
+					debug: false
+				},
+				connection: {
+					reconnect: true,
+				},
+				identity: {
+					username: "{{ username }}",
+				    password: "{{ oauth }}"
+				},
+				channels: ["#{{ username }}"]
+			};
+
+			client = new tmi.client(options);
+
+			// Connect the client to the server..
+			client.connect();
+
+			client.on("chat", function (channel, userstate, message, self) {
+				if( message == "!pewpew" ) {
+					addUser( userstate["display-name"] );
+
+					$("#chatteroids").show();
+					if( refreshTimer ) {
+						clearTimeout( refreshTimer );
+					}
+					// refreshTimer = setTimeout(() => {
+					// 	location.reload();
+					// }, 120000);
+				}
+			});
+		});
+	</script>
+{% endblock %}
