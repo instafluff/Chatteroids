@@ -65,7 +65,10 @@
 			// console.log( "left: " + leftTotal );
 			// console.log( "right: " + rightTotal );
 			if( total > 0 && total < rayMax - 10 ) {
-				if( leftTotal > rightTotal ) {
+				if( total < rayMax / 2 ) { // Too close to everything so try and turn left
+					pikaState = "left";
+				}
+				else if( leftTotal > rightTotal ) {
 					pikaState = "left";
 				}
 				else {
@@ -127,12 +130,15 @@
 			this.game.antialias = true;
 			this.game.clearBeforeRender = true;
 			startGame();
+			// for( var i = 0; i < 10; i++ ) {
+			// 	addUser( "test_" + i );
+			// }
+			// $("#chatteroids").show();
 		}
 
-		function botRaycast( angle, maxRayLength = 300 ) {
-			var pX = bot.x, pY = bot.y;
+		function botRaycast( pX, pY, angle, maxRayLength = 300 ) {
 			var dX = Math.cos( angle ), dY = Math.sin( angle );
-			var pX1 = bot.x + dX * maxRayLength, pY1 = bot.y + dY * maxRayLength;
+			var pX1 = pX + dX * maxRayLength, pY1 = pY + dY * maxRayLength;
 			if( !line ) {
 				line = new Phaser.Geom.Line( pX, pY, pX1, pY1 );
 			}
@@ -221,11 +227,12 @@
 				graphics.clear();
 				var timeFactor = 0.05;
 				var rayVals = [];
-				var numCasts = 10;
+				var numCasts = 9;
 				for( var i = 0; i < numCasts; i++ ) {
-					var change = ( numCasts / 2 - Math.abs( i - numCasts / 2 ) ) / ( numCasts / 2 );
-					rayVals.push( botRaycast( botDirection - PI / 2 + i * PI / ( numCasts - 1 ),
-				 		300 * change ) );
+					var factor = i / ( numCasts - 1 );
+					var mid = ( numCasts - 1 ) / 2;
+					var change = ( mid - Math.abs( i - mid ) ) / mid;
+					rayVals.push( botRaycast( bot.x, bot.y, botDirection - PI / 2 + factor * PI, 200 * change + 100 ) );
 				}
 				var turnAngle = aiCompute( rayVals );
 				botTurn( turnAngle * timeFactor );
