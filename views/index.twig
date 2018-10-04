@@ -3,10 +3,12 @@
 {% block body %}
 	<div id="chatteroids"></div>
 	<script>
+		var Width = 800, Height = 800;
+
 		var config = {
 			type: Phaser.AUTO,
-			width: 800,
-			height: 800,
+			width: Width,
+			height: Height,
     	// transparent: true,
 			parent: 'chatteroids',
 			physics: {
@@ -134,8 +136,7 @@
 			if( !line ) {
 				line = new Phaser.Geom.Line( pX, pY, pX1, pY1 );
 			}
-			console.log( dX + ", " + dY );
-			console.log( pX1 + " " + pY1 );
+			var closestMarbleDist = maxRayLength * 2;
 			for( var marble in balls ) {
 				var marbleObj = balls[ marble ];
 				var distToMarble = distToSegment( { x: marbleObj.object.x, y: marbleObj.object.y }, { x: pX, y: pY }, { x: pX1, y: pY1 } );
@@ -146,31 +147,50 @@
 					var cX = marbleObj.object.x, cY = marbleObj.object.y;
 					var vX = cX - pX, vY = cY - pY;
 					var vLen = Math.sqrt( vX * vX + vY * vY ) - 32;
-					var appxX = pX + dX * vLen, appxY = pY + dY * vLen;
-					if( debug ) {
-						console.log( appxX + " - " + appxY );
-						line.setTo( pX, pY, appxX, appxY );
-						graphics.strokeLineShape( line );
-						graphics.strokeCircleShape(circle);
+					graphics.strokeCircleShape(circle);
+					if( vLen < closestMarbleDist ) {
+						closestMarbleDist = vLen;
 					}
-					return vLen;
 				}
+			}
+			if( closestMarbleDist < maxRayLength ) {
+				if( debug ) {
+					var appxX = pX + dX * closestMarbleDist, appxY = pY + dY * closestMarbleDist;
+					line.setTo( pX, pY, appxX, appxY );
+					graphics.strokeLineShape( line );
+				}
+				return closestMarbleDist;
 			}
 			// console.log( "no intersect" );
 			// Check against walls
 			if( pX1 < 0 ) {
-				return Math.abs( dX * pX );
+				var y = pY - ( dY / dX ) * pX;
+				var distToWall = Math.sqrt( pX * pX + ( y - pY ) * ( y - pY ) );
+				line.setTo( pX, pY, pX + dX * distToWall, pY + dY * distToWall );
+				graphics.strokeLineShape( line );
+				return distToWall;
 			}
-			if( pX1 > 800 ) {
-				var x = 800 - pX;
-				return Math.abs( dX * x );
+			if( pX1 > Width ) {
+				var x = Width - pX;
+				var y = pY - ( dY / dX ) * x;
+				var distToWall = Math.sqrt( x * x + ( y - pY ) * ( y - pY ) );
+				line.setTo( pX, pY, pX + dX * distToWall, pY + dY * distToWall );
+				graphics.strokeLineShape( line );
+				return distToWall;
 			}
 			if( pY1 < 0 ) {
-				return Math.abs( dY * pY );
+				var y = pX - ( dX / dY ) * pY;
+				var distToWall = Math.sqrt( pY * pY + ( y - pX ) * ( y - pX ) );
+				line.setTo( pX, pY, pX + dX * distToWall, pY + dY * distToWall );
+				graphics.strokeLineShape( line );
+				return distToWall;
 			}
-			if( pY1 > 800 ) {
-				var y = 800 - pY;
-				return Math.abs( dY * y );
+			if( pY1 > Height ) {
+				var y = pX - ( dX / dY ) * ( Height - pY );
+				var distToWall = Math.sqrt( ( Height - pY ) * ( Height - pY ) + ( y - pX ) * ( y - pX ) );
+				line.setTo( pX, pY, pX + dX * distToWall, pY + dY * distToWall );
+				graphics.strokeLineShape( line );
+				return distToWall;
 			}
 			if( debug ) {
 				line.setTo( pX, pY, pX1, pY1 );
