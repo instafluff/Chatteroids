@@ -3,7 +3,7 @@
 {% block body %}
 	<div id="chatteroids"></div>
 	<script>
-		var Width = 800, Height = 800;
+		var Width = 1200, Height = 800;
 
 		var config = {
 			type: Phaser.AUTO,
@@ -27,23 +27,28 @@
 
 		var game = new Phaser.Game(config);
 		var graphics;
-		var debug = false;//true;
+		var debug = false;
 		var phaser = undefined;
 		var collisions;
 		var colliders = {};
-		var bot;
 		var balls = {};
 		var winners = {};
 		var refreshTimer = null;
-		var botDirection = 0; // -1 left, 0 straight, 1 right
 		const PI = 3.1415926535;
-		var botDirection = 0;// -PI / 2;
 		var botVelocity = 300;
 		var turnSpeed = PI;
 		var maxAngle = 60 * ( 2 * PI / 360 );
 		var lastBotUpdateTime = 0;
 		var line;
+		var numCollisions = 0;
+		var timePassedInMinutes = 0;
+		var collisionText;
+		var net = new brain.NeuralNetwork();
+		var trainData = [];
+		var trainMax = 1000;
 
+		var pikachus = [];
+		var numPikas = 30;
 		var pikaState = "idle"; // "idle", "left", "right"
 		var previousRayVals = -1;
 
@@ -118,7 +123,7 @@
 			}
 		}
 
-		function aiComputeSim() {
+		function aiComputeSim( index ) {
 			var pokeballs = [];
 			for( ball in balls ) {
 				var obj = balls[ ball ];
@@ -129,20 +134,38 @@
 					vy: obj.object.body.velocity.y,
 				});
 			}
+			var rays = rayPika( pikachus[ index ], pokeballs, 0, 0.0 );
+			var raySum = rays.reduce( (a, b) => a + b );
 			var scorePreSim = {
-				left45: rayPika( pokeballs, -PI / 2, 0.0 ).reduce( (a, b) => a + b ),
-				straight: rayPika( pokeballs, 0, 0.0 ).reduce( (a, b) => a + b ),
-				right45: rayPika( pokeballs, PI / 2, 0.0 ).reduce( (a, b) => a + b ),
+				left45: raySum,
+				straight: raySum,
+				right45: raySum,
 			}
 			pokeballs = simulate( pokeballs, 0.15 );
 			var scores = {
-				left45: scorePreSim[ "left45" ] * -1 + rayPika( pokeballs, -PI / 2, 0.15 ).reduce( (a, b) => a + b ),
-				straight: scorePreSim[ "straight" ] * -1 + rayPika( pokeballs, 0, 0.15 ).reduce( (a, b) => a + b ),
-				right45: scorePreSim[ "right45" ] * -1 + rayPika( pokeballs, PI / 2, 0.15 ).reduce( (a, b) => a + b ),
+				left45: scorePreSim[ "left45" ] * -1 + rayPika( pikachus[ index ], pokeballs, -PI / 2, 0.15 ).reduce( (a, b) => a + b ),
+				straight: scorePreSim[ "straight" ] * -1 + rayPika( pikachus[ index ], pokeballs, 0, 0.15 ).reduce( (a, b) => a + b ),
+				right45: scorePreSim[ "right45" ] * -1 + rayPika( pikachus[ index ], pokeballs, PI / 2, 0.15 ).reduce( (a, b) => a + b ),
 			}
 			console.log( scores );
 			var maxScore = Object.keys( scores ).reduce( (a, b) => ( scores[ a ] > scores[ b ] ? a : b ) );
 			console.log( maxScore );
+			if( Object.keys( balls ).length > 10 ) {
+				// console.log( rays.map( x => x / 1000 ) );
+				var normalizedScores = Object.keys( scores ).map( x => scores[ x ] / 10000 + 0.5 );
+				console.log( normalizedScores );
+				trainData.push( {
+					input: normalizedScores,//rays.map( x => x / 1000 ),
+					output: { [maxScore]: 1 }
+				});
+			}
+			if( trainData.length >= trainMax ) {
+				var sample = getRandomSubset( trainData, 300 );
+				net.train( sample, {
+					log: ( x => console.log( x ) )
+				} );
+				// console.log( waaa.waa.waa );
+			}
 			switch( maxScore ) {
 				case "left45": return -90;
 				case "straight": return 0;
@@ -151,11 +174,47 @@
 			}
 		}
 
-		function rayPika( pokeballs, angle, timestep ) {
+		function aiComputeNN( index ) {
+			var pokeballs = [];
+			for( ball in balls ) {
+				var obj = balls[ ball ];
+				pokeballs.push({
+					x: obj.object.x,
+					y: obj.object.y,
+					vx: obj.object.body.velocity.x,
+					vy: obj.object.body.velocity.y,
+				});
+			}
+			var rays = rayPika( pikachus[ index ], pokeballs, 0, 0.0 );
+			var raySum = rays.reduce( (a, b) => a + b );
+			var scorePreSim = {
+				left45: raySum,
+				straight: raySum,
+				right45: raySum,
+			}
+			pokeballs = simulate( pokeballs, 0.15 );
+			var scores = {
+				left45: scorePreSim[ "left45" ] * -1 + rayPika( pikachus[ index ], pokeballs, -PI / 2, 0.15 ).reduce( (a, b) => a + b ),
+				straight: scorePreSim[ "straight" ] * -1 + rayPika( pikachus[ index ], pokeballs, 0, 0.15 ).reduce( (a, b) => a + b ),
+				right45: scorePreSim[ "right45" ] * -1 + rayPika( pikachus[ index ], pokeballs, PI / 2, 0.15 ).reduce( (a, b) => a + b ),
+			}
+			var normalizedScores = Object.keys( scores ).map( x => scores[ x ] / 10000 + 0.5 );
+			var output = net.run( normalizedScores );// rays.map( x => x / 1000 ) );
+			var calculated = Object.keys( output ).reduce( (a, b) => output[ a ] > output[ b ] ? a : b );
+			console.log( calculated );
+			switch( calculated ) {
+				case "left45": return -90;
+				case "straight": return 0;
+				case "right45": return 90;
+				default: return 0;
+			}
+		}
+
+		function rayPika( pikaBot, pokeballs, angle, timestep ) {
 			angle *= timestep * turnSpeed;
 			var pika = {
-				x: bot.x + botVelocity * Math.cos( botDirection + angle ) * timestep,
-				y: bot.y + botVelocity * Math.sin( botDirection + angle ) * timestep
+				x: pikaBot.x + botVelocity * Math.cos( pikaBot.dir + angle ) * timestep,
+				y: pikaBot.y + botVelocity * Math.sin( pikaBot.dir + angle ) * timestep
 			};
 			var rayVals = [];
 			var numCasts = 11;
@@ -163,7 +222,7 @@
 				var factor = i / ( numCasts - 1 );
 				var mid = ( numCasts - 1 ) / 2;
 				var change = ( mid - Math.abs( i - mid ) ) / mid;
-				rayVals.push( botRaycast( pokeballs, pika.x, pika.y, botDirection + angle - PI / 2 + factor * PI, 200 * change + 100 ) );
+				rayVals.push( botRaycast( pokeballs, pika.x, pika.y, pikaBot.dir + angle - PI / 2 + factor * PI, 200 * change + 100 ) );
 			}
 			return rayVals;
 		}
@@ -194,11 +253,15 @@
 			graphics = this.add.graphics({ lineStyle: { width: 4, color: 0xaa00aa } });
 			this.game.antialias = true;
 			this.game.clearBeforeRender = true;
+			collisionText = this.add.text( 20, 20, "Collisions: 0" );
+			collisionText.setScale( 2 );
+			console.log( collisionText );
 			startGame();
-			for( var i = 0; i < 1; i++ ) {
-				addUser( "test_" + i );
-			}
+			// for( var i = 0; i < 1; i++ ) {
+			// 	addUser( "test_" + i );
+			// }
 			$("#chatteroids").show();
+			numCollisions = 0;
 		}
 
 		function botRaycast( pokeballs, pX, pY, angle, maxRayLength = 300 ) {
@@ -280,7 +343,7 @@
 			return maxRayLength;
 		}
 
-		function botTurn( angle ) {
+		function botTurn( pikaBot, angle ) {
 			var angleRads = angle * ( 2 * PI / 360 );
 			if( angleRads < -maxAngle ) {
 				angleRads = -maxAngle;
@@ -288,44 +351,59 @@
 			if( angleRads > maxAngle ) {
 				angleRads = maxAngle;
 			}
-			botDirection += angleRads;
-			if( botDirection < -PI * 2 ) {
-				botDirection += PI * 2;
+			pikaBot.dir += angleRads;
+			if( pikaBot.dir < -PI * 2 ) {
+				pikaBot.dir += PI * 2;
 			}
-			if( botDirection > PI * 2 ) {
-				botDirection -= PI * 2;
+			if( pikaBot.dir > PI * 2 ) {
+				pikaBot.dir -= PI * 2;
 			}
 		}
 
 		function update(time, delta) {
+			timePassedInMinutes += delta / 1000 / 60;
+			var collisionsPerMinute = ( numCollisions / timePassedInMinutes ).toFixed( 2 );
+			var pokemaster = "";
+			if( Object.keys( winners ).length > 0 ) {
+				pokemaster = Object.keys( winners ).reduce( (a, b) => winners[ a ] > winners[ b ] ? a : b );
+			}
+			collisionText.setText( "Pokeballs: " + Object.keys( balls ).length + "\nPokeMaster: " + pokemaster + "(" + winners[ pokemaster ] + ")\nTime: " + timePassedInMinutes.toFixed( 2 ) + "\nCollisions / Min: " + collisionsPerMinute );
 			if( time - 50 > lastBotUpdateTime ) {
 				graphics.clear();
 				var timeFactor = 0.001 * ( time - lastBotUpdateTime );//0.05;
 				// console.log( timeFactor );
-				var rayVals = [];
-				var numCasts = 11;
-				var pokeballs = [];
-				for( ball in balls ) {
-					var obj = balls[ ball ];
-					pokeballs.push({
-						x: obj.object.x,
-						y: obj.object.y,
-						vx: obj.object.body.velocity.x,
-						vy: obj.object.body.velocity.y,
-					});
+				for( var index = 0; index < numPikas; index++ ) {
+					var rayVals = [];
+					var numCasts = 11;
+					var pokeballs = [];
+					for( ball in balls ) {
+						var obj = balls[ ball ];
+						pokeballs.push({
+							x: obj.object.x,
+							y: obj.object.y,
+							vx: obj.object.body.velocity.x,
+							vy: obj.object.body.velocity.y,
+						});
+					}
+					for( var i = 0; i < numCasts; i++ ) {
+						var factor = i / ( numCasts - 1 );
+						var mid = ( numCasts - 1 ) / 2;
+						var change = ( mid - Math.abs( i - mid ) ) / mid;
+						rayVals.push( botRaycast( pokeballs, pikachus[ index ].x, pikachus[ index ].y, pikachus[ index ].dir - PI / 2 + factor * PI, 200 * change + 100 ) );
+					}
+					// var turnAngle = aiCompute( rayVals );
+					var turnAngle;
+					if( trainData.length < trainMax ) {
+						 turnAngle = aiComputeSim( index );
+					}
+					else {
+						turnAngle = aiComputeNN( index );
+					}
+					botTurn( pikachus[ index ], turnAngle * turnSpeed * timeFactor );
+					pikachus[ index ].setVelocity( botVelocity * Math.cos( pikachus[ index ].dir ), botVelocity * Math.sin( pikachus[ index ].dir ) );
+					// bot.setVelocity( 0, 0 );
+					pikachus[ index ].setAngle( 270 + pikachus[ index ].dir * ( 360 / ( 2 * PI ) ) );
 				}
-				for( var i = 0; i < numCasts; i++ ) {
-					var factor = i / ( numCasts - 1 );
-					var mid = ( numCasts - 1 ) / 2;
-					var change = ( mid - Math.abs( i - mid ) ) / mid;
-					rayVals.push( botRaycast( pokeballs, bot.x, bot.y, botDirection - PI / 2 + factor * PI, 200 * change + 100 ) );
-				}
-				// var turnAngle = aiCompute( rayVals );
-				var turnAngle = aiComputeSim();
-				botTurn( turnAngle * turnSpeed * timeFactor );
-				bot.setVelocity( botVelocity * Math.cos( botDirection ), botVelocity * Math.sin( botDirection ) );
-				// bot.setVelocity( 0, 0 );
-				bot.setAngle( 270 + botDirection * ( 360 / ( 2 * PI ) ) );
 				lastBotUpdateTime = time;
 			}
 
@@ -342,15 +420,20 @@
 				bounceX: 1, bounceY: 1,
 				collideWorldBounds: true
 			});
-			bot = phaser.physics.add.image( 400, 400, "wizball" );
-			bot.setOrigin( 0.5 );
-			bot.setCircle( 16 );
-			bot.setBounce( 1 );
-			bot.setCollideWorldBounds(true);
+			for( var i = 0; i < numPikas; i++ ) {
+				pikachus.push( phaser.physics.add.image( 200 * Math.random() + 300, 200 * Math.random() + 300, "wizball" ) );
+				pikachus[ i ].dir = 0;
+				pikachus[ i ].setOrigin( 0.5 );
+				pikachus[ i ].setCircle( 16 );
+				pikachus[ i ].setBounce( 1 );
+				pikachus[ i ].setCollideWorldBounds(true);
+			}
 		}
 
 		function addUser( username ) {
 			if( !balls[ username ] ) {
+				numCollisions = 0;
+				timePassedInMinutes = 0;
 				var dropPosition = getRandomInt(768);
 				// var userMarble = phaser.physics.add.image(dropPosition, 65, 'wizball');
 				// var userMarble = collisions.create(dropPosition, -165, 'moon');
@@ -379,8 +462,10 @@
 				// 		marble.setVelocity( ( getRandomInt( 100 ) + 20 ) * ( marble.x < block.x ? -1 : 1 ), -100 );
 				// 	}
 				// });
-				phaser.physics.add.collider( userMarble, bot, ( marble, pika ) => {
+				phaser.physics.add.collider( userMarble, pikachus, ( marble, pika ) => {
+					numCollisions++;
 					console.log( marble.name + " collided with Pikachu!" );
+					winners[ marble.name ] = ( winners[ marble.name ] || 0 ) + 1;
 				});
 				balls[ username ] = {
 					text: userText,
@@ -392,6 +477,20 @@
 		function getRandomInt(max) {
 		  return Math.floor(Math.random() * Math.floor(max));
 		}
+
+		function getRandomSubset(arr, n) {
+	    var result = new Array(n),
+	        len = arr.length,
+	        taken = new Array(len);
+	    if (n > len)
+	        throw new RangeError("getRandom: more elements taken than available");
+	    while (n--) {
+	        var x = Math.floor(Math.random() * len);
+	        result[n] = arr[x in taken ? taken[x] : x];
+	        taken[x] = --len in taken ? taken[len] : len;
+	    }
+	    return result;
+	}
 
 		function sqr(x) { return x * x }
 		function dist2(v, w) { return sqr(v.x - w.x) + sqr(v.y - w.y) }
@@ -430,7 +529,20 @@
 			client.connect();
 
 			client.on("chat", function (channel, userstate, message, self) {
-				if( message == "!pewpew" ) {
+				if( message == "!boost" ) {
+					if( balls[ userstate[ "display-name" ] ] ) {
+						var pokeball = balls[ userstate[ "display-name" ] ];
+						var speed = Math.sqrt( pokeball.object.body.velocity.x * pokeball.object.body.velocity.x +
+							pokeball.object.body.velocity.y * pokeball.object.body.velocity.y );
+						var dX = pokeball.object.body.velocity.x / speed;
+						var dY = pokeball.object.body.velocity.y / speed;
+						pokeball.object.setVelocity(
+							pokeball.object.body.velocity.x + dX * 100,
+							pokeball.object.body.velocity.y + dY * 100
+						);
+					}
+				}
+				if( message == "!pewpew" || message == "!neurowaa" ) {
 					addUser( userstate["display-name"] );
 
 					$("#chatteroids").show();
